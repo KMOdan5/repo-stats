@@ -49,9 +49,6 @@
   .stat { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 16px; min-width: 128px; }
   .stat b { display: block; font-size: 22px; }
   .chart { position: relative; height: 280px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
-  table { border-collapse: collapse; width: 100%; font-size: 14px; }
-  th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); }
-  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   a { color: var(--c1); }
   #error { color: var(--c4); }
 </style>
@@ -59,7 +56,7 @@
 <body>
 <main>
   <h1>Tool Stats</h1>
-  <p class="muted">GitHub のリポジトリの訪問数とダウンロード数の推移です。毎日 1 回(日本時間 9 時台)に記録しています。日付は UTC です。</p>
+  <p class="muted">GitHub のリポジトリの閲覧数・訪問者数・ダウンロード数の推移です。毎日 1 回(日本時間 9 時台)に記録しています。日付は UTC です。</p>
   <p id="error"></p>
   <div id="repos"></div>
 </main>
@@ -153,7 +150,7 @@ function stat(parent, label, value) {
   parent.appendChild(box);
 }
 
-function renderRepo(repo, views, downloads, referrers) {
+function renderRepo(repo, views, downloads) {
   const section = el('section');
   const h2 = el('h2');
   h2.appendChild(el('a', { href: `https://github.com/${repo}` }, repo.split('/')[1]));
@@ -196,46 +193,20 @@ function renderRepo(repo, views, downloads, referrers) {
     section.appendChild(el('p', { className: 'muted' }, 'まだ記録がありません。'));
   }
 
-  /* 来た元のサイト: 最新の記録の日の、直近 14 日の上位 */
-  const rDates = [...new Set(referrers.map(r => r.date))].sort();
-  const lastR = rDates[rDates.length - 1];
-  section.appendChild(el('h3', {}, '来た元のサイト'));
-  if (lastR) {
-    section.appendChild(el('p', { className: 'muted' }, `${lastR} に記録した、直近 14 日の上位です。`));
-    const table = el('table');
-    const head = table.insertRow();
-    for (const [text, cls] of [['サイト', ''], ['閲覧数', 'num'], ['訪問者数', 'num']]) {
-      const th = el('th', { className: cls }, text);
-      head.appendChild(th);
-    }
-    for (const r of referrers.filter(r => r.date === lastR).sort((a, b) => b.views - a.views)) {
-      const tr = table.insertRow();
-      tr.insertCell().textContent = r.referrer;
-      for (const v of [r.views, r.uniques]) {
-        const td = tr.insertCell();
-        td.className = 'num';
-        td.textContent = v;
-      }
-    }
-    section.appendChild(table);
-  } else {
-    section.appendChild(el('p', { className: 'muted' }, 'まだ記録がありません。'));
-  }
-
   document.getElementById('repos').appendChild(section);
 }
 
 (async () => {
   try {
-    const [views, downloads, referrers] = await Promise.all(['views', 'downloads', 'referrers'].map(load));
-    const repos = [...new Set([...views, ...downloads, ...referrers].map(r => r.repo))].sort();
+    const [views, downloads] = await Promise.all(['views', 'downloads'].map(load));
+    const repos = [...new Set([...views, ...downloads].map(r => r.repo))].sort();
     if (!repos.length) {
       document.getElementById('repos').appendChild(el('p', { className: 'muted' }, 'まだ記録がありません。'));
       return;
     }
     for (const repo of repos) {
       const of = rows => rows.filter(r => r.repo === repo);
-      renderRepo(repo, of(views), of(downloads), of(referrers));
+      renderRepo(repo, of(views), of(downloads));
     }
   } catch (e) {
     document.getElementById('error').textContent = `データを読み込めませんでした: ${e.message}`;

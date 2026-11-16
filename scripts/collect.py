@@ -1,4 +1,4 @@
-"""GitHub のリポジトリの訪問数・来た元のサイト・リリースのダウンロード数を集め、data/ の CSV に足す。
+"""GitHub のリポジトリの訪問数・来た元のサイト・リリースのダウンロード数・スター数などを集め、data/ の CSV に足す。
 
 使い方: GITHUB_TOKEN に読み取り用のトークンを入れて、リポジトリの一番上で実行する。
     python3 scripts/collect.py
@@ -13,6 +13,8 @@ CSV の形(1 行に 1 つの数。DB にそのまま取り込める形):
     記録した日の、添付ファイルごとのダウンロード数の合計。日ごとの増え方は、前の日との差で出す。
 - data/referrers.csv … date, repo, referrer, views, uniques
     記録した日に GitHub が返す、直近 14 日の来た元のサイトの上位。
+- data/repo.csv      … date, repo, stars, forks, watchers
+    記録した日の、スター数・フォーク数・ウォッチ数。
 
 日付は UTC。同じ日に何度実行しても、その日の行が置き換わるだけで、行は増えない。
 """
@@ -34,6 +36,7 @@ COLUMNS = {
     "views": ["date", "repo", "views", "uniques"],
     "downloads": ["date", "repo", "tag", "asset", "downloads"],
     "referrers": ["date", "repo", "referrer", "views", "uniques"],
+    "repo": ["date", "repo", "stars", "forks", "watchers"],
 }
 
 # CSV ごとの、行を見分けるための列(この順に並べて書く)
@@ -41,6 +44,7 @@ KEYS = {
     "views": ["date", "repo"],
     "downloads": ["date", "repo", "tag", "asset"],
     "referrers": ["date", "repo", "referrer"],
+    "repo": ["date", "repo"],
 }
 
 
@@ -116,6 +120,7 @@ def main() -> int:
     views = read_rows("views")
     downloads = read_rows("downloads")
     referrers = read_rows("referrers")
+    repo_rows = read_rows("repo")
     failed = 0
 
     for repo in repos:
@@ -143,6 +148,14 @@ def main() -> int:
                 for r in get(f"/repos/{repo}/traffic/popular/referrers", token)
             ]
             referrers = replace(referrers, new, lambda r: r["repo"] == repo and r["date"] == today)
+
+            # スター数・フォーク数・ウォッチ数: 今日の数(ウォッチ数は API では subscribers_count)
+            info = get(f"/repos/{repo}", token)
+            new = [{
+                "date": today, "repo": repo, "stars": info["stargazers_count"],
+                "forks": info["forks_count"], "watchers": info["subscribers_count"],
+            }]
+            repo_rows = replace(repo_rows, new, lambda r: r["repo"] == repo and r["date"] == today)
             print(f"{repo}: ok")
         except Exception as error:  # 1 つのリポジトリで失敗しても、ほかのリポジトリは記録する
             failed += 1
@@ -151,6 +164,7 @@ def main() -> int:
     write_rows("views", views)
     write_rows("downloads", downloads)
     write_rows("referrers", referrers)
+    write_rows("repo", repo_rows)
     return 1 if failed else 0
 
 
