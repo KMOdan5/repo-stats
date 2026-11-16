@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tool Stats</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1f2328;
+    --muted: #656d76;
+    --line: #d0d7de;
+    --card: #f6f8fa;
+    --c1: #2f6feb;
+    --c2: #1a7f37;
+    --c3: #bf8700;
+    --c4: #cf222e;
+    --c5: #8250df;
+    --c6: #0a7d8c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --fg: #e6edf3;
+      --muted: #8d96a0;
+      --line: #30363d;
+      --card: #161b22;
+      --c1: #4493f8;
+      --c2: #3fb950;
+      --c3: #d29922;
+      --c4: #f85149;
+      --c5: #a371f7;
+      --c6: #39c5cf;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font: 15px/1.6 system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif;
+  }
+  main { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  h2 { font-size: 20px; margin: 40px 0 8px; }
+  h3 { font-size: 16px; margin: 24px 0 8px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .summary { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 0; }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 16px; min-width: 128px; }
+  .stat b { display: block; font-size: 22px; }
+  .chart { position: relative; height: 280px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  a { color: var(--c1); }
+  #error { color: var(--c4); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Tool Stats</h1>
+  <p class="muted">GitHub のリポジトリの訪問数とダウンロード数の推移です。毎日 1 回(日本時間 9 時台)に記録しています。日付は UTC です。</p>
+  <p id="error"></p>
+  <div id="repos"></div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script>
+/* CSV を読む(1 行目が列名。ダブルクォートで囲んだ値にも対応する) */
+function parseCsv(text) {
+  const rows = [];
+  let row = [], cell = '', quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (quoted) {
+      if (ch === '"' && text[i + 1] === '"') { cell += '"'; i++; }
+      else if (ch === '"') quoted = false;
+      else cell += ch;
+    } else if (ch === '"') quoted = true;
+    else if (ch === ',') { row.push(cell); cell = ''; }
+    else if (ch === '\n') { row.push(cell); rows.push(row); row = []; cell = ''; }
+    else if (ch !== '\r') cell += ch;
+  }
+  if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
+  const [head, ...body] = rows;
+  return body.filter(r => r.length === head.length).map(r => Object.fromEntries(head.map((h, i) => [h, r[i]])));
+}
+
+async function load(name) {
+  const res = await fetch(`data/${name}.csv`, { cache: 'no-cache' });
+  if (res.status === 404) return [];
+  if (!res.ok) throw new Error(`data/${name}.csv: ${res.status}`);
+  return parseCsv(await res.text());
+}
+
+/* 最初の日から最後の日までの日付を、抜けなく並べる */
+function dateRange(dates) {
+  if (!dates.length) return [];
+  const sorted = [...dates].sort();
+  const out = [];
+  const end = new Date(sorted[sorted.length - 1] + 'T00:00:00Z');
+  for (let d = new Date(sorted[0] + 'T00:00:00Z'); d <= end; d.setUTCDate(d.getUTCDate() + 1))
+    out.push(d.toISOString().slice(0, 10));
+  return out;
+}
+
+const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+const palette = () => ['--c1', '--c2', '--c3', '--c4', '--c5', '--c6'].map(css);
+
+function el(tag, attrs = {}, text) {
+  const e = document.createElement(tag);
+  Object.assign(e, attrs);
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+function lineChart(parent, labels, datasets, yTitle) {
+  const box = el('div', { className: 'chart' });
+  const canvas = el('canvas');
+  box.appendChild(canvas);
+  parent.appendChild(box);
+  const colors = palette();
+  new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: datasets.map((d, i) => ({
+        ...d,
+        borderColor: colors[i % colors.length],
+        backgroundColor: colors[i % colors.length],
+        pointRadius: 2,
+        tension: 0.2,
+        spanGaps: true,
+      })),
+    },
+    options: {
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      scales: {
+        x: { ticks: { color: css('--muted'), maxRotation: 0, autoSkipPadding: 16 }, grid: { color: css('--line') } },
+        y: { beginAtZero: true, title: { display: true, text: yTitle, color: css('--muted') },
+             ticks: { color: css('--muted'), precision: 0 }, grid: { color: css('--line') } },
+      },
+      plugins: { legend: { labels: { color: css('--fg') } } },
+    },
+  });
+}
+
+function stat(parent, label, value) {
+  const box = el('div', { className: 'stat' });
+  box.appendChild(el('span', { className: 'muted' }, label));
+  box.appendChild(el('b', {}, value.toLocaleString('ja-JP')));
+  parent.appendChild(box);
+}
+
+function renderRepo(repo, views, downloads, referrers) {
+  const section = el('section');
+  const h2 = el('h2');
+  h2.appendChild(el('a', { href: `https://github.com/${repo}` }, repo.split('/')[1]));
+  section.appendChild(h2);
+
+  /* 最新の記録の日の、ダウンロード数の合計 */
+  const dlDates = [...new Set(downloads.map(r => r.date))].sort();
+  const lastDl = dlDates[dlDates.length - 1];
+  const totalDownloads = downloads.filter(r => r.date === lastDl).reduce((s, r) => s + Number(r.downloads), 0);
+  const summary = el('div', { className: 'summary' });
+  stat(summary, 'ダウンロード数(合計)', totalDownloads);
+  stat(summary, '閲覧数(記録した期間)', views.reduce((s, r) => s + Number(r.views), 0));
+  section.appendChild(summary);
+
+  /* 訪問数: 記録のない日は 0(GitHub は訪問のない日を返さないことがあるため) */
+  section.appendChild(el('h3', {}, '訪問数'));
+  const vDates = dateRange(views.map(r => r.date));
+  const vByDate = Object.fromEntries(views.map(r => [r.date, r]));
+  lineChart(section, vDates, [
+    { label: '閲覧数', data: vDates.map(d => Number(vByDate[d]?.views ?? 0)) },
+    { label: '訪問者数', data: vDates.map(d => Number(vByDate[d]?.uniques ?? 0)) },
+  ], '回・人');
+
+  /* ダウンロード数: 版ごとの合計の推移。記録のない日は線をつなぐ */
+  section.appendChild(el('h3', {}, 'ダウンロード数(版ごとの合計)'));
+  if (dlDates.length) {
+    const days = dateRange(dlDates);
+    const tags = [...new Set(downloads.map(r => r.tag))];
+    const sum = {};
+    for (const r of downloads) {
+      const key = `${r.date}|${r.tag}`;
+      sum[key] = (sum[key] ?? 0) + Number(r.downloads);
+    }
+    const recorded = new Set(dlDates);
+    lineChart(section, days, [
+      { label: '全体', data: days.map(d => recorded.has(d) ? tags.reduce((s, t) => s + (sum[`${d}|${t}`] ?? 0), 0) : null) },
+      ...tags.map(t => ({ label: t, data: days.map(d => recorded.has(d) ? (sum[`${d}|${t}`] ?? 0) : null) })),
+    ], '回');
+  } else {
+    section.appendChild(el('p', { className: 'muted' }, 'まだ記録がありません。'));
+  }
+
+  /* 来た元のサイト: 最新の記録の日の、直近 14 日の上位 */
+  const rDates = [...new Set(referrers.map(r => r.date))].sort();
+  const lastR = rDates[rDates.length - 1];
+  section.appendChild(el('h3', {}, '来た元のサイト'));
+  if (lastR) {
+    section.appendChild(el('p', { className: 'muted' }, `${lastR} に記録した、直近 14 日の上位です。`));
+    const table = el('table');
+    const head = table.insertRow();
+    for (const [text, cls] of [['サイト', ''], ['閲覧数', 'num'], ['訪問者数', 'num']]) {
+      const th = el('th', { className: cls }, text);
+      head.appendChild(th);
+    }
+    for (const r of referrers.filter(r => r.date === lastR).sort((a, b) => b.views - a.views)) {
+      const tr = table.insertRow();
+      tr.insertCell().textContent = r.referrer;
+      for (const v of [r.views, r.uniques]) {
+        const td = tr.insertCell();
+        td.className = 'num';
+        td.textContent = v;
+      }
+    }
+    section.appendChild(table);
+  } else {
+    section.appendChild(el('p', { className: 'muted' }, 'まだ記録がありません。'));
+  }
+
+  document.getElementById('repos').appendChild(section);
+}
+
+(async () => {
+  try {
+    const [views, downloads, referrers] = await Promise.all(['views', 'downloads', 'referrers'].map(load));
+    const repos = [...new Set([...views, ...downloads, ...referrers].map(r => r.repo))].sort();
+    if (!repos.length) {
+      document.getElementById('repos').appendChild(el('p', { className: 'muted' }, 'まだ記録がありません。'));
+      return;
+    }
+    for (const repo of repos) {
+      const of = rows => rows.filter(r => r.repo === repo);
+      renderRepo(repo, of(views), of(downloads), of(referrers));
+    }
+  } catch (e) {
+    document.getElementById('error').textContent = `データを読み込めませんでした: ${e.message}`;
+  }
+})();
+</script>
+</body>
+</html>

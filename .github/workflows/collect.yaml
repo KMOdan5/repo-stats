@@ -1,0 +1,44 @@
+# 毎日 1 回、各ツールの訪問数・来た元のサイト・ダウンロード数を data/ に記録する。
+# 訪問数の API には、リポジトリの「Administration」の読み取りの権限が要る。
+# Actions の標準のトークンには付けられないため、きめ細かいトークンを Secrets の STATS_TOKEN に登録して使う。
+# 記録したデータのコミットには、標準のトークン(このリポジトリへの書き込み)を使う。
+name: Collect stats
+
+on:
+  schedule:
+    # GitHub の訪問数は UTC の日で区切られる。前の日の数が確定した後に取る(UTC 0:37 = 日本時間 9:37)
+    - cron: '37 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: collect-stats
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Collect
+        env:
+          GITHUB_TOKEN: ${{ secrets.STATS_TOKEN }}
+        run: python3 scripts/collect.py
+
+      # 中身が変わったときだけコミットする(変わらない日にコミットを増やさないため)
+      - name: Commit
+        if: always()
+        run: |
+          git add data
+          if git diff --cached --quiet; then
+            echo "no changes"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Record stats $(date -u +%Y-%m-%d)"
+          git push
