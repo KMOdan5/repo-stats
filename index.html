@@ -57,6 +57,7 @@
 <main>
   <h1>Tool Stats</h1>
   <p class="muted">GitHub のリポジトリの閲覧数・訪問者数・ダウンロード数の推移です。毎日 1 回(日本時間 9 時台)に記録しています。日付は UTC です。</p>
+  <p class="muted" id="updated"></p>
   <p id="error"></p>
   <div id="repos"></div>
 </main>
@@ -196,7 +197,27 @@ function renderRepo(repo, views, downloads) {
   document.getElementById('repos').appendChild(section);
 }
 
+/* 更新日時を日本時間で表示する。UTC との時間差も添える(例: 2026-11-16 09:37 JST (UTC+9)) */
+async function showUpdated() {
+  try {
+    const res = await fetch('data/updated.json', { cache: 'no-cache' });
+    if (!res.ok) return;
+    const date = new Date((await res.json()).updated);
+    if (isNaN(date)) return;
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Tokyo', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZoneName: 'shortOffset',
+    }).formatToParts(date).map(p => [p.type, p.value]));
+    const offset = parts.timeZoneName.replace('GMT', 'UTC');
+    document.getElementById('updated').textContent =
+      `更新日時: ${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute} JST (${offset})`;
+  } catch {
+    /* 更新日時が読めなくても、グラフは表示する */
+  }
+}
+
 (async () => {
+  showUpdated();
   try {
     const [views, downloads] = await Promise.all(['views', 'downloads'].map(load));
     const repos = [...new Set([...views, ...downloads].map(r => r.repo))].sort();

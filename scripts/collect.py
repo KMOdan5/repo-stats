@@ -17,6 +17,8 @@ CSV の形(1 行に 1 つの数。DB にそのまま取り込める形):
     記録した日の、スター数・フォーク数・ウォッチ数。
 
 日付は UTC。同じ日に何度実行しても、その日の行が置き換わるだけで、行は増えない。
+
+data/updated.json には、CSV の中身が変わった日時(UTC)を書く。ページの「更新日時」に使う。
 """
 
 import csv
@@ -82,8 +84,11 @@ def read_rows(name: str):
         return list(csv.DictReader(f))
 
 
-def write_rows(name: str, rows):
-    """行を日付・リポジトリなどの順に並べて書く。中身が変わらなければ書かない(余計なコミットを出さないため)。"""
+def write_rows(name: str, rows) -> bool:
+    """行を日付・リポジトリなどの順に並べて書く。中身が変わらなければ書かない(余計なコミットを出さないため)。
+
+    中身が変わって書いたら True を返す。
+    """
     columns = COLUMNS[name]
     rows = sorted(rows, key=lambda row: [str(row[c]) for c in KEYS[name]])
     path = DATA / f"{name}.csv"
@@ -93,8 +98,9 @@ def write_rows(name: str, rows):
         lines.append(",".join(csv_cell(row[c]) for c in columns))
     text = "\n".join(lines) + "\n"
     if path.exists() and path.read_text(encoding="utf-8") == text:
-        return
+        return False
     path.write_text(text, encoding="utf-8")
+    return True
 
 
 def csv_cell(value) -> str:
@@ -161,10 +167,17 @@ def main() -> int:
             failed += 1
             print(f"{repo}: failed ({error})", file=sys.stderr)
 
-    write_rows("views", views)
-    write_rows("downloads", downloads)
-    write_rows("referrers", referrers)
-    write_rows("repo", repo_rows)
+    changed = [
+        write_rows("views", views),
+        write_rows("downloads", downloads),
+        write_rows("referrers", referrers),
+        write_rows("repo", repo_rows),
+    ]
+    # 更新日時は、中身が変わったときだけ書き換える(変わらない日にコミットを出さないため)
+    updated = DATA / "updated.json"
+    if any(changed) or not updated.exists():
+        now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+        updated.write_text(json.dumps({"updated": now.isoformat().replace("+00:00", "Z")}) + "\n", encoding="utf-8")
     return 1 if failed else 0
 
 
