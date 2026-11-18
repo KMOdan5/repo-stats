@@ -16,7 +16,8 @@ GitHub の「Insights」→「Traffic」は直近 14 日分しか残らず、リ
 どれも「日付・リポジトリ・項目・数」を 1 行ずつ並べた CSV です。日付は UTC です。
 
 ## 仕組み
-- `.github/workflows/collect.yaml` が毎日 UTC 0:37(日本時間 9:37)に `scripts/collect.py` を動かし、`data/` に記録します。中身が変わったときだけコミットします
+- `.github/workflows/collect.yaml` が毎日 2 回(UTC 3:37 と 15:37、日本時間 12:37 と 0:37)`scripts/collect.py` を動かし、`data/` に記録します。中身が変わったときだけコミットします
+- GitHub の訪問数は、前の日の数が API に出るまで半日ほどかかります。そのため、グラフの訪問数は前の日の分までが、その日の後半に出ます
 - `index.html` が `data/` の CSV を読み、閲覧数・訪問者数・ダウンロード数を GitHub Pages で折れ線グラフにします(来た元のサイトとスター数などは、記録だけしています)
 - 記録するリポジトリは `repos.json` に並べます
 
